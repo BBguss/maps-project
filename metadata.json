@@ -1,0 +1,8 @@
+{
+  "name": "GeoTrack Realtime",
+  "description": "A real-time location tracking application using Leaflet maps and Supabase. Features precise user positioning and an admin dashboard for data visualization.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera"
+  ]
+}

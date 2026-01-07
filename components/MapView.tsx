@@ -3,22 +3,18 @@ import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, LayersControl }
 import L from 'leaflet';
 import { UserLocation } from '../types';
 
-const iconUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png';
-const iconRetinaUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png';
-const shadowUrl = 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png';
-
-const DefaultIcon = L.icon({
-    iconUrl: iconUrl,
-    iconRetinaUrl: iconRetinaUrl,
-    shadowUrl: shadowUrl,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41],
-    popupAnchor: [1, -34],
-    tooltipAnchor: [16, -28],
-    shadowSize: [41, 41]
+// Custom Red Pulsing Icon Definition
+const RedPulseIcon = L.divIcon({
+  className: 'red-pulsing-marker',
+  html: `
+    <div class="pulse-ring"></div>
+    <div class="pulse-ring"></div>
+    <div class="dot-core"></div>
+  `,
+  iconSize: [20, 20], // Matches the CSS size logic roughly
+  iconAnchor: [10, 10], // Exact center (half of size)
+  popupAnchor: [0, -20]
 });
-
-L.Marker.prototype.options.icon = DefaultIcon;
 
 interface MapViewProps {
   location: UserLocation | null;
@@ -35,12 +31,15 @@ const RecenterMap: React.FC<{ location: UserLocation; shouldRecenter: boolean; o
 
   useEffect(() => {
     if (location && shouldRecenter) {
+      // Fix for mobile: invalidate size to ensure map knows its container size before centering
+      map.invalidateSize();
+
       // Changed zoom to 22 (maximum supported by config) for extreme close-up
       const targetZoom = location.source === 'ip' ? 15 : 22;
       
       map.flyTo([location.lat, location.lng], targetZoom, {
         animate: true,
-        duration: 3, // Slower duration for better visual effect of zooming in
+        duration: 2.0, // Slightly faster for snappier tracking feel
         easeLinearity: 0.25
       });
       onComplete();
@@ -99,22 +98,25 @@ const MapView: React.FC<MapViewProps> = ({ location, shouldRecenter, onRecenterC
               onComplete={onRecenterComplete}
             />
             
+            {/* Show accuracy circle mainly for IP source or low accuracy GPS, 
+                but keep it subtle for GPS so the red dot is the focus */}
             <Circle 
               center={[location.lat, location.lng]}
               radius={location.accuracy || (location.source === 'ip' ? 1000 : 5)}
               pathOptions={{ 
-                fillColor: location.source === 'ip' ? '#F59E0B' : '#ef4444', 
-                fillOpacity: 0.1, 
-                color: location.source === 'ip' ? '#D97706' : '#dc2626', 
+                fillColor: location.source === 'ip' ? '#F59E0B' : '#ff0000', 
+                fillOpacity: 0.05, 
+                color: location.source === 'ip' ? '#D97706' : '#ff0000', 
                 weight: 1,
+                opacity: 0.3,
                 dashArray: '5, 10' 
               }}
             />
             
-            <Marker position={[location.lat, location.lng]}>
+            <Marker position={[location.lat, location.lng]} icon={RedPulseIcon}>
               <Popup className="custom-popup">
                 <div className="font-mono text-xs">
-                  <p className="font-bold uppercase mb-1">Target Located</p>
+                  <p className="font-bold uppercase mb-1 text-red-500">Target Locked</p>
                   <p>Lat: {location.lat.toFixed(6)}</p>
                   <p>Lng: {location.lng.toFixed(6)}</p>
                 </div>

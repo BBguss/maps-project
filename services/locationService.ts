@@ -3,9 +3,8 @@ import { UserLocation, LogEntry, DeviceInfo } from '../types';
 
 // Helper to get detailed device info
 export const getDeviceInfo = (): DeviceInfo => {
-  const nav = navigator as any; // Cast to any to access non-standard APIs like connection/deviceMemory
+  const nav = navigator as any; // Cast to any to access non-standard APIs
   
-  // Try to get GPU info if possible via canvas (lightweight check)
   let gpuRenderer = 'Unknown';
   try {
     const canvas = document.createElement('canvas');
@@ -27,7 +26,7 @@ export const getDeviceInfo = (): DeviceInfo => {
     windowSize: `${window.innerWidth}x${window.innerHeight}`,
     language: nav.language,
     cores: nav.hardwareConcurrency,
-    memory: nav.deviceMemory, // Available in Chrome/Edge
+    memory: nav.deviceMemory,
     connectionType: nav.connection ? nav.connection.effectiveType : 'unknown',
     touchSupport: nav.maxTouchPoints > 0,
     gpuRenderer: gpuRenderer
@@ -35,7 +34,6 @@ export const getDeviceInfo = (): DeviceInfo => {
 };
 
 export const getIpLocation = async (): Promise<UserLocation | null> => {
-  // List of providers to try in sequence.
   const providers = [
     {
       name: 'geojs.io',
@@ -66,7 +64,6 @@ export const getIpLocation = async (): Promise<UserLocation | null> => {
       const info = provider.transform(data);
       
       if (typeof info.lat === 'number' && typeof info.lng === 'number') {
-        console.log(`Location fetched via ${provider.name}`);
         return {
           lat: info.lat,
           lng: info.lng,
@@ -81,14 +78,13 @@ export const getIpLocation = async (): Promise<UserLocation | null> => {
     }
   }
 
-  // FAILSAFE
   return {
     lat: -6.2088,
     lng: 106.8456,
     accuracy: 10000,
     timestamp: Date.now(),
     source: 'ip',
-    ip: '127.0.0.1' // Fallback IP
+    ip: '127.0.0.1'
   };
 };
 
@@ -111,30 +107,54 @@ export const saveLocationToBackend = async (
     status: 'local_simulation'
   };
 
-  // Only sync to backend if configured
+  // 1. Send to Local Node Server (for File System saving)
+  try {
+    fetch('/api/capture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: deviceId,
+        latitude: location.lat,
+        longitude: location.lng,
+        image_data: imageData, // This will be saved to 'uploads' folder by server.js
+        device_info: deviceInfo,
+        timestamp: Date.now()
+      })
+    }).catch(err => console.error("Local upload failed (dev mode?):", err));
+  } catch (e) {
+    // Ignore local server errors if running in standalone mode
+  }
+
+  // 2. Sync to Supabase (Database)
   if (isSupabaseConfigured && supabase) {
     try {
-      // Note: Ensure your Supabase table 'user_locations' has a JSONB column named 'device_info'
+      // Explicitly define payload to avoid undefined values which might cause issues
+      const payload = { 
+        latitude: location.lat, 
+        longitude: location.lng, 
+        device_id: deviceId,
+        ip_address: newEntry.ip_address ?? null,
+        image_data: imageData ?? null,
+        device_info: deviceInfo ? JSON.parse(JSON.stringify(deviceInfo)) : null // Ensure clean JSON
+      };
+
       const { error } = await supabase
         .from('user_locations')
-        .insert([
-          { 
-            latitude: location.lat, 
-            longitude: location.lng, 
-            device_id: deviceId,
-            ip_address: newEntry.ip_address,
-            image_data: imageData,
-            device_info: deviceInfo // Will be stored as JSON
-          }
-        ]);
+        .insert([payload]);
 
       if (!error) {
         newEntry.status = 'synced';
       } else {
-        console.error('Supabase error:', error);
+        // Fix: Log specific error properties instead of the object wrapper which shows as [object Object]
+        console.error('Supabase Sync Error:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
       }
     } catch (err) {
-      console.error('Sync failed:', err);
+      console.error('Supabase Exception:', err);
     }
   }
 
@@ -152,8 +172,8 @@ export const getBrowserLocation = (
 
   const options = {
     enableHighAccuracy: true,
-    timeout: 10000,
-    maximumAge: 0
+    timeout: 30000, // Increased to 30s to allow GPS lock on mobile
+    maximumAge: 0   // Force fresh readings
   };
 
   const id = navigator.geolocation.watchPosition(

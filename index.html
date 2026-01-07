@@ -17,6 +17,24 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
+        background-color: #0f172a; /* Dark background to prevent white flash */
+      }
+      
+      /* Smooth map fade in */
+      .leaflet-container {
+        background: #1a1a1a !important;
+      }
+      
+      /* Custom Popup Style for Surveillance Look */
+      .leaflet-popup-content-wrapper {
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.8);
+        color: #fff;
+        backdrop-filter: blur(4px);
+        border: 1px solid #333;
+      }
+      .leaflet-popup-tip {
+        background: rgba(0, 0, 0, 0.8);
       }
     </style>
   <script type="importmap">
@@ -28,11 +46,12 @@
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.0",
     "react-leaflet": "https://esm.sh/react-leaflet@^5.0.0",
     "leaflet": "https://esm.sh/leaflet@^1.9.4",
-    "url": "https://esm.sh/url@^0.11.4",
+    "vite": "https://esm.sh/vite@^7.3.1",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
     "express": "https://esm.sh/express@^5.2.1",
-    "vite": "https://esm.sh/vite@^7.3.1",
-    "path": "https://esm.sh/path@^0.12.7"
+    "path": "https://esm.sh/path@^0.12.7",
+    "fs": "https://esm.sh/fs@^0.0.1-security",
+    "url": "https://esm.sh/url@^0.11.4"
   }
 }
 </script>

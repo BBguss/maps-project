@@ -30,19 +30,28 @@ const RecenterMap: React.FC<{ location: UserLocation; shouldRecenter: boolean; o
   const map = useMap();
 
   useEffect(() => {
-    if (location && shouldRecenter) {
+    // Safety check for invalid coords
+    if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number' || isNaN(location.lat) || isNaN(location.lng)) {
+        return;
+    }
+
+    if (shouldRecenter) {
       // Fix for mobile: invalidate size to ensure map knows its container size before centering
       map.invalidateSize();
 
       // Changed zoom to 22 (maximum supported by config) for extreme close-up
       const targetZoom = location.source === 'ip' ? 15 : 22;
       
-      map.flyTo([location.lat, location.lng], targetZoom, {
-        animate: true,
-        duration: 2.0, // Slightly faster for snappier tracking feel
-        easeLinearity: 0.25
-      });
-      onComplete();
+      try {
+        map.flyTo([location.lat, location.lng], targetZoom, {
+          animate: true,
+          duration: 2.0, // Slightly faster for snappier tracking feel
+          easeLinearity: 0.25
+        });
+        onComplete();
+      } catch (e) {
+        console.error("Leaflet FlyTo Error:", e);
+      }
     }
   }, [location, shouldRecenter, map, onComplete]);
 
@@ -58,6 +67,12 @@ const MapView: React.FC<MapViewProps> = ({ location, shouldRecenter, onRecenterC
     const timer = setTimeout(() => setReady(true), 100);
     return () => clearTimeout(timer);
   }, []);
+
+  const isValidLocation = location && 
+                          typeof location.lat === 'number' && 
+                          typeof location.lng === 'number' && 
+                          !isNaN(location.lat) && 
+                          !isNaN(location.lng);
 
   return (
     <div className={`w-full h-full relative z-0 transition-opacity duration-1000 ease-in-out ${ready ? 'opacity-100' : 'opacity-0'}`}>
@@ -90,7 +105,7 @@ const MapView: React.FC<MapViewProps> = ({ location, shouldRecenter, onRecenterC
           </LayersControl.BaseLayer>
         </LayersControl>
         
-        {location && (
+        {isValidLocation && location && (
           <>
             <RecenterMap 
               location={location} 

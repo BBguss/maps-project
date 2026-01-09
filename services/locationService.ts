@@ -63,7 +63,8 @@ export const getIpLocation = async (): Promise<UserLocation | null> => {
       const data = await response.json();
       const info = provider.transform(data);
       
-      if (typeof info.lat === 'number' && typeof info.lng === 'number') {
+      // Fix: Strictly check if lat/lng are valid numbers and not NaN
+      if (typeof info.lat === 'number' && typeof info.lng === 'number' && !isNaN(info.lat) && !isNaN(info.lng)) {
         return {
           lat: info.lat,
           lng: info.lng,
